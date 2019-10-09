@@ -11,9 +11,9 @@ from file_read_backwards import FileReadBackwards
 LAST_SESSION_FILE = '/root/.pwnagotchi-last-session'
 
 
-class SessionParser(object):
+class LastSession(object):
     EPOCH_TOKEN = '[epoch '
-    EPOCH_PARSER = re.compile(r'^\s*\[epoch (\d+)\] (.+)')
+    EPOCH_PARSER = re.compile(r'^.+\[epoch (\d+)\] (.+)')
     EPOCH_DATA_PARSER = re.compile(r'([a-z_]+)=([^\s]+)')
     TRAINING_TOKEN = ' training epoch '
     START_TOKEN = 'connecting to http'
@@ -21,6 +21,29 @@ class SessionParser(object):
     ASSOC_TOKEN = 'sending association frame to '
     HANDSHAKE_TOKEN = '!!! captured new handshake '
     PEER_TOKEN = 'detected unit '
+
+    def __init__(self, config):
+        self.config = config
+        self.voice = Voice(lang=config['main']['lang'])
+        self.path = config['main']['log']
+        self.last_session = []
+        self.last_session_id = ''
+        self.last_saved_session_id = ''
+        self.duration = ''
+        self.duration_human = ''
+        self.deauthed = 0
+        self.associated = 0
+        self.handshakes = 0
+        self.peers = 0
+        self.last_peer = None
+        self.epochs = 0
+        self.train_epochs = 0
+        self.min_reward = 1000
+        self.max_reward = -1000
+        self.avg_reward = 0
+        self._peer_parser = re.compile(
+            'detected unit (.+)@(.+) \(v.+\) on channel \d+ \(([\d\-]+) dBm\) \[sid:(.+) pwnd_tot:(\d+) uptime:(\d+)\]')
+        self.parsed = False
 
     def _get_last_saved_session_id(self):
         saved = ''
@@ -70,27 +93,27 @@ class SessionParser(object):
             if started_at is None:
                 started_at = stopped_at
 
-            if SessionParser.DEAUTH_TOKEN in line and line not in cache:
+            if LastSession.DEAUTH_TOKEN in line and line not in cache:
                 self.deauthed += 1
                 cache[line] = 1
 
-            elif SessionParser.ASSOC_TOKEN in line and line not in cache:
+            elif LastSession.ASSOC_TOKEN in line and line not in cache:
                 self.associated += 1
                 cache[line] = 1
 
-            elif SessionParser.HANDSHAKE_TOKEN in line and line not in cache:
+            elif LastSession.HANDSHAKE_TOKEN in line and line not in cache:
                 self.handshakes += 1
                 cache[line] = 1
 
-            elif SessionParser.TRAINING_TOKEN in line:
+            elif LastSession.TRAINING_TOKEN in line:
                 self.train_epochs += 1
 
-            elif SessionParser.EPOCH_TOKEN in line:
+            elif LastSession.EPOCH_TOKEN in line:
                 self.epochs += 1
-                m = SessionParser.EPOCH_PARSER.findall(line)
+                m = LastSession.EPOCH_PARSER.findall(line)
                 if m:
                     epoch_num, epoch_data = m[0]
-                    m = SessionParser.EPOCH_DATA_PARSER.findall(epoch_data)
+                    m = LastSession.EPOCH_DATA_PARSER.findall(epoch_data)
                     for key, value in m:
                         if key == 'reward':
                             reward = float(value)
@@ -101,7 +124,7 @@ class SessionParser(object):
                             elif reward > self.max_reward:
                                 self.max_reward = reward
 
-            elif SessionParser.PEER_TOKEN in line:
+            elif LastSession.PEER_TOKEN in line:
                 m = self._peer_parser.findall(line)
                 if m:
                     name, pubkey, rssi, sid, pwnd_tot, uptime = m[0]
@@ -134,23 +157,7 @@ class SessionParser(object):
         self.duration_human = ', '.join(self.duration_human)
         self.avg_reward /= (self.epochs if self.epochs else 1)
 
-    def __init__(self, config):
-        self.config = config
-        self.voice = Voice(lang=config['main']['lang'])
-        self.path = config['main']['log']
-        self.last_session = None
-        self.last_session_id = ''
-        self.last_saved_session_id = ''
-        self.duration = ''
-        self.duration_human = ''
-        self.deauthed = 0
-        self.associated = 0
-        self.handshakes = 0
-        self.peers = 0
-        self.last_peer = None
-        self._peer_parser = re.compile(
-            'detected unit (.+)@(.+) \(v.+\) on channel \d+ \(([\d\-]+) dBm\) \[sid:(.+) pwnd_tot:(\d+) uptime:(\d+)\]')
-
+    def parse(self):
         lines = []
 
         if os.path.exists(self.path):
@@ -160,7 +167,7 @@ class SessionParser(object):
                     if line != "" and line[0] != '[':
                         continue
                     lines.append(line)
-                    if SessionParser.START_TOKEN in line:
+                    if LastSession.START_TOKEN in line:
                         break
             lines.reverse()
 
@@ -172,6 +179,7 @@ class SessionParser(object):
         self.last_saved_session_id = self._get_last_saved_session_id()
 
         self._parse_stats()
+        self.parsed = True
 
     def is_new(self):
         return self.last_session_id != self.last_saved_session_id

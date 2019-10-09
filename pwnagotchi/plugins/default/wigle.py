@@ -12,7 +12,7 @@ import csv
 from datetime import datetime
 import requests
 from pwnagotchi.mesh.wifi import freq_to_channel
-from scapy.all import RadioTap, Dot11Elt, Dot11Beacon, rdpcap, Scapy_Exception, Dot11, Dot11ProbeResp, Dot11AssoReq, Dot11ReassoReq, Dot11EltRSN, Dot11EltVendorSpecific, Dot11EltMicrosoftWPA
+from pwnagotchi.utils import WifiInfo, FieldNotFoundError, extract_from_pcap
 
 READY = False
 ALREADY_UPLOADED = None
@@ -26,6 +26,8 @@ AKMSUITE_TYPES = {
 }
 
 def _handle_packet(packet, result):
+    from scapy.all import RadioTap, Dot11Elt, Dot11Beacon, rdpcap, Scapy_Exception, Dot11, Dot11ProbeResp, Dot11AssoReq, \
+        Dot11ReassoReq, Dot11EltRSN, Dot11EltVendorSpecific, Dot11EltMicrosoftWPA
     """
     Analyze each packet and extract the data from Dot11 layers
     """
@@ -76,6 +78,8 @@ def _handle_packet(packet, result):
 
 
 def _analyze_pcap(pcap):
+    from scapy.all import RadioTap, Dot11Elt, Dot11Beacon, rdpcap, Scapy_Exception, Dot11, Dot11ProbeResp, Dot11AssoReq, \
+        Dot11ReassoReq, Dot11EltRSN, Dot11EltVendorSpecific, Dot11EltMicrosoftWPA
     """
     Iterate over the packets and extract data
     """
@@ -148,13 +152,13 @@ def _transform_wigle_entry(gps_data, pcap_data):
 
     writer = csv.writer(dummy, delimiter=",", quoting=csv.QUOTE_NONE)
     writer.writerow([
-        pcap_data['bssid'],
-        pcap_data['essid'].decode('utf-8'),
-        _format_auth(pcap_data['encryption']),
+        pcap_data[WifiInfo.BSSID],
+        pcap_data[WifiInfo.ESSID],
+        _format_auth(pcap_data[WifiInfo.ENCRYPTION]),
         datetime.strptime(gps_data['Updated'].rsplit('.')[0],
                           "%Y-%m-%dT%H:%M:%S").strftime('%Y-%m-%d %H:%M:%S'),
-        pcap_data['channel'],
-        pcap_data['rssi'],
+        pcap_data[WifiInfo.CHANNEL],
+        pcap_data[WifiInfo.RSSI],
         gps_data['Latitude'],
         gps_data['Longitude'],
         gps_data['Altitude'],
@@ -192,7 +196,9 @@ def _send_to_wigle(lines, api_key, timeout=30):
         raise re_e
 
 
-def on_internet_available(display, config, log):
+def on_internet_available(agent):
+    from scapy.all import RadioTap, Dot11Elt, Dot11Beacon, rdpcap, Scapy_Exception, Dot11, Dot11ProbeResp, Dot11AssoReq, \
+        Dot11ReassoReq, Dot11EltRSN, Dot11EltVendorSpecific, Dot11EltMicrosoftWPA
     """
     Called in manual mode when there's internet connectivity
     """
@@ -200,6 +206,9 @@ def on_internet_available(display, config, log):
     global SKIP
 
     if READY:
+        config = agent.config()
+        display = agent.view()
+
         handshake_dir = config['bettercap']['handshakes']
         all_files = os.listdir(handshake_dir)
         all_gps_files = [os.path.join(handshake_dir, filename)
@@ -232,24 +241,24 @@ def on_internet_available(display, config, log):
                     SKIP.append(gps_file)
                     continue
 
-                try:
-                    pcap_data = _analyze_pcap(pcap_filename)
-                except Scapy_Exception as sc_e:
-                    logging.error("WIGLE: %s", sc_e)
+                if gps_data['Latitude'] == 0 and gps_data['Longitude'] == 0:
+                    logging.warning("WIGLE: Not enough gps-informations for %s. Trying again next time.", gps_file)
                     SKIP.append(gps_file)
                     continue
 
-                # encrypption-key is only there if privacy-cap was set
-                if 'encryption' in pcap_data:
-                    if not pcap_data['encryption']:
-                        pcap_data['encryption'].add('WEP')
-                else:
-                    # no encryption, nothing to eat :(
-                    pcap_data['encryption'] = set()
-                    pcap_data['encryption'].add('OPN')
 
-                if len(pcap_data) < 5:
-                    # not enough data; try next time
+                try:
+                    pcap_data = extract_from_pcap(pcap_filename, [WifiInfo.BSSID,
+                                                                  WifiInfo.ESSID,
+                                                                  WifiInfo.ENCRYPTION,
+                                                                  WifiInfo.CHANNEL,
+                                                                  WifiInfo.RSSI])
+                except FieldNotFoundError:
+                    logging.error("WIGLE: Could not extract all informations. Skip %s", gps_file)
+                    SKIP.append(gps_file)
+                    continue
+                except Scapy_Exception as sc_e:
+                    logging.error("WIGLE: %s", sc_e)
                     SKIP.append(gps_file)
                     continue
 
