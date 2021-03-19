@@ -11,5 +11,5 @@ file-read-backwards==2.0.0
 numpy==1.17.2
 inky==0.0.5
 smbus2==0.3.0
-Pillow==6.2.0
+Pillow==8.1.1
 spidev==3.4
