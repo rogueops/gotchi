@@ -4,7 +4,7 @@ PyYAML==5.4
 scapy==2.4.3
 gym==0.14.0
 stable-baselines==2.7.0
-tensorflow==2.11.1
+tensorflow==2.12.1
 tensorflow-estimator==1.14.0
 tweepy==3.6.0
 file-read-backwards==2.0.0
